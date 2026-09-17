@@ -1,108 +1,110 @@
 # session-handoff
 
-**v0.1 — early, and honest about it.** Read [Validation status](#validation-status) before you rely on it.
+**v0.1 —— 早期版本，而且我如实说明。** 依赖它之前，请先读[验证状态](#验证状态)。
 
-An [Agent Skills](https://agentskills.io/specification) skill that moves the knowledge inside a long agent session into three durable files, so the session itself can be thrown away.
+一个 [Agent Skills](https://agentskills.io/specification) skill：把长会话里的知识搬进三份持久文件，让会话本身可以被丢弃。
 
-## The problem
+## 问题
 
-A long agent session gets more expensive and less reliable with every turn. Compaction is lossy, and what it discards first is the valuable part: **why** a design was chosen, and which approaches already failed. The summary then keeps costing tokens on every later turn.
+长会话每多一轮就变贵一点、变糊一点。压缩（compaction）是有损的，而它最先丢掉的恰恰是最值钱的部分：**为什么**这么设计、哪些方案已经试过并且失败了。而那段摘要此后每一轮都还在收费。
 
-The thing you are afraid of losing — "this session knows everything about my project" — is usually already gone by then. Compaction ate it. You are paying full price for a degraded copy.
+你真正怕丢的那句"这个会话知道我的项目的一切"——到那时通常已经没了。压缩把它吃掉了。**你在为一具退化的副本付全价。**
 
-## What this does
+## 它做什么
 
-It moves *knowledge about the project* out of the conversation and into files. What stays in the session is only the working state — the debug trail you are mid-way through, which is the one thing a session is genuinely irreplaceable for.
+它把**关于项目的知识**搬出对话、搬进文件。留在会话里的只剩工作台状态——你正追到一半的调试链路，那是会话唯一不可替代的东西。
 
-Three files, each with exactly one job:
+三份文件，各只有一个职责：
 
-| File | Holds | Auto-loaded? |
+| 文件 | 装什么 | 自动加载 |
 |---|---|---|
-| `AGENTS.md` | The constitution: startup pointer, one-line positioning, hard constraints, build/test/acceptance commands, known traps | **Yes** |
-| `docs/STATUS.md` | Status: deliverables and how each was verified, next step, open questions, known defects | No |
-| `docs/DECISIONS.md` | Rationale: each decision, why, and what was rejected | No |
+| `AGENTS.md` | 宪法：开工前必读指针、一句话定位、硬约束、构建/测试/验收命令、已知的坑 | **是** |
+| `docs/STATUS.md` | 状态：交付物及各自的验收方式、下一步、未决问题、已知缺陷 | 否 |
+| `docs/DECISIONS.md` | 理由：每条决定、为什么、被否掉了什么 | 否 |
 
-Every fact has exactly one home. The same fact in two files becomes two contradictory truths later.
+每条事实只有一个家。同一个事实出现在两个文件里，日后就会变成两份互相矛盾的真相。
 
-**The load-bearing detail:** hosts auto-load `AGENTS.md` (DSH, ZCode, Claude Code, Codex) but not `docs/STATUS.md` or `docs/DECISIONS.md`. So `AGENTS.md` carries a mandatory pointer that makes a brand-new session read the other two. Get that pointer right and the next session needs only the word "continue".
+**承重的那处细节：** 宿主会自动加载 `AGENTS.md`（DSH、ZCode、Claude Code、Codex），但**不会**加载 `docs/STATUS.md` 和 `docs/DECISIONS.md`。所以 `AGENTS.md` 里必须放一条强制指针，让全新会话去读那两份文件。指针写对了，下一个会话只需要你说一句"继续"。
 
-## Install
+## 安装
 
-A skill is a plain directory bundle: `SKILL.md` plus optional `references/`, `scripts/`, `evals/`. This one has no runtime dependencies and no scripts.
+skill 就是一个普通目录包：`SKILL.md`，加上可选的 `references/`、`scripts/`、`evals/`。本 skill 无运行依赖、无脚本。
 
-**Shared cross-tool root** — read by DSH and by other `SKILL.md`-compatible agents:
+**跨工具共享根** —— DSH 以及其他兼容 `SKILL.md` 的 agent 都会读它：
 
 ```bash
 git clone https://github.com/fanpaisk/session-handoff ~/.agents/skills/session-handoff
 ```
 
-**Per-tool roots**, if your tool does not scan the shared one:
+**各工具自己的根**（如果你的工具不扫共享根）：
 
-| Tool | Path |
+| 工具 | 路径 |
 |---|---|
-| DSH | `~/.agents/skills/` or `$DSH_HOME/skills/` |
-| Claude Code | `~/.claude/skills/` or `<repo>/.claude/skills/` |
+| DSH | `~/.agents/skills/` 或 `$DSH_HOME/skills/` |
+| Claude Code | `~/.claude/skills/` 或 `<repo>/.claude/skills/` |
 | Codex | `~/.codex/skills/` |
-| Project-local (any) | `<project>/.agents/skills/` |
+| 项目内（任何工具） | `<project>/.agents/skills/` |
 
-Some tools scan **one level only**: the bundle must be `<root>/<name>/SKILL.md`. A `SKILL.md` nested any deeper is not discovered.
+有些工具**只扫一层**：目录包必须是 `<根>/<名字>/SKILL.md`。再往深一层嵌套的 `SKILL.md` 不会被发现。
 
-## Use
+## 使用
 
-After a feature passes acceptance, and before you open a new session:
+在一个功能通过验收之后、开启新会话之前：
 
 ```
-Use session-handoff
+用 session-handoff 交接
 ```
 
-It will:
+它会：
 
-1. Locate the project root, check whether the handoff files are under version control, and retire any competing status documents.
-2. **Re-run** the build/test/acceptance commands — not recall them. A compacted session's memory of "tests passed" may refer to a checkout that no longer exists.
-3. Write the three files, wrapping the `AGENTS.md` contribution in idempotent `<!-- SESSION_HANDOFF:START -->` / `<!-- SESSION_HANDOFF:END -->` markers, so re-running replaces rather than duplicates it.
-4. Run a self-check, then emit a five-section handoff report.
+1. 定位项目根，检查交接文件是否受版本控制，并退役与之竞争的旧状态文档。
+2. **当场重跑**构建/测试/验收命令——不凭记忆写。一个已压缩的会话对"测试通过"的记忆，可能对应一个已经不存在的检出状态。
+3. 写出三份文件，并把 `AGENTS.md` 的交接内容包在幂等标记 `<!-- SESSION_HANDOFF:START -->` / `<!-- SESSION_HANDOFF:END -->` 之间，所以重复运行只会**替换**而不会**重复**。
+4. 跑一遍自检，然后输出一份五节的交接报告。
 
-Then open a fresh session and paste the opener it gives you — or, if the pointer is in place, just say "continue".
+接着开一个新会话，把它给你的开场白粘进去——或者，如果强制指针已经就位，只说"继续"就够了。
 
-### Verifying the handoff actually worked
+### 验证交接是否真的成功
 
-The only reliable acceptance test is a **cold read**: open a session with no history and ask it to restate what the project is, its hard constraints, its current status, and the next step. If it cannot, the files have a gap. **Fix the files — never explain it back in the old session.** Explaining it back is precisely the dependency this skill exists to remove.
+唯一可靠的验收方式是**冷读**：开一个没有任何历史的会话，要求它复述"这个项目是什么、硬约束有哪些、当前状态、下一步做什么"。如果它复述不出来，说明文件有缺口。
 
-## Validation status
+**去补文件——绝不要回老会话里解释一遍。** 回老会话解释，正是这个 skill 要消除的那种依赖。
 
-**v0.1, with limited real-world use. Read this section before depending on it.**
+## 验证状态
 
-| | Status |
+**v0.1，真实使用次数有限。依赖它之前请读完本节。**
+
+| 项目 | 状态 |
 |---|---|
-| [Agent Skills spec](https://agentskills.io/specification) conformance | ✅ Verified mechanically — `name`, `description`, directory layout; frontmatter carries no tool-specific fields, so it ports between hosts |
-| Real user handoff runs | **1**, on a 22k-file project, using an earlier revision of this skill |
-| Evaluator runs (author, on a disposable copy of that project) | **1** |
-| Cold-read acceptance test | **1 pass** — a zero-context agent reconstructed the project from the three files alone, and surfaced 23 gaps and contradictions while doing it |
-| `evals/evals.json` | Written: 8 cases, 42 assertions — **never executed** |
-| `evals` fixtures | **Not built.** The 5 fixtures are described in `evals.json` but do not exist, so the suite cannot run yet |
-| Idempotent marker path | Exercised once |
-| Pre-marker migration path | Exercised once, on a hand-built scenario. The rule it produced was added *because* that run failed |
-| Credential-leak scenario | Exercised once — 0 leaks, on a project with a live secrets file in its root |
+| [Agent Skills 规范](https://agentskills.io/specification)符合度 | ✅ 机械校验通过——`name`、`description`、目录布局；frontmatter 不含任何工具专有字段，所以能跨宿主移植 |
+| 真实用户交接运行 | **1 次**，在一个 2.2 万文件的项目上，用的是本 skill 的更早修订版 |
+| 评估者运行（作者，在该项目的可丢弃副本上） | **1 次** |
+| 冷读验收测试 | **1 次通过**——一个零上下文 agent 仅凭这三份文件重建了项目，并在此过程中找出 23 处缺口与矛盾 |
+| `evals/evals.json` | 已写：8 个用例、42 条断言——**从未执行** |
+| `evals` 的 fixture | **未建**。`evals.json` 里描述了 5 个 fixture，但它们不存在，所以测试套件现在跑不起来 |
+| 幂等标记路径 | 跑过 1 次 |
+| 无标记旧文件的迁移路径 | 跑过 1 次，用的是手工构造的场景。**产生的那条规则正是因为那次运行失败才被加进去的** |
+| 凭据泄漏场景 | 跑过 1 次——**0 泄漏**，而那个项目的根目录里确实有一个活的密钥文件 |
 
-Two findings from those runs are why the skill is shaped the way it is:
+上面这些运行得出的两个发现，正是这个 skill 现在长成这样的原因：
 
-- The rule **"re-run verification, do not recall it"** caught a recorded acceptance command that had silently gone stale: a later decision had changed the mechanism, and the old command no longer tested what it claimed. It had been sitting in a handoff marked "verified".
-- A literal reading of the append rule produced **two contradictory copies** of the same constraints inside one `AGENTS.md`. The rule now distinguishes previous handoff output from user-written rules, and asks the user instead of guessing when it cannot tell.
+- 那条**「当场重跑验证、不要凭记忆」**的规则，抓出了一条被标记为"已验收"、但**已经静默失效**的命令：后来的一次决定换掉了机制，旧命令不再检验它声称检验的东西。而它一直躺在交接文档里，标着"已验收"。
+- 对"追加"规则的字面执行，会在同一个 `AGENTS.md` 里造出**两套互相矛盾的约束副本**。现在这条规则会区分"上一轮交接的产物"和"用户自己写的规则"，分不清时**向用户提问**，不猜。
 
-## Known limitations
+## 已知局限
 
-- **The skill body is written in Simplified Chinese.** The format is portable; the prose is not.
-- **The "just say continue" claim depends on the host auto-loading project instruction files.** DSH, ZCode, Claude Code and Codex do. On a host that does not, the skill degrades gracefully — you paste the opener it emits — but the convenience is gone.
-- **It cannot fix a project with no runnable acceptance criteria.** If "done" is not executable, the handoff will record that honestly, and nothing more.
-- **Migrating a pre-existing handoff file needs judgment.** The skill asks the user when it cannot classify a section. It does not guess.
-- **The evals are unexecuted** (see above). Treat them as a specification of intent, not as a passing suite.
+- **本 skill 正文为简体中文。** 格式可移植，但文字不是。非中文使用者需要自行翻译正文。
+- **"只说『继续』就够"这条依赖宿主自动加载项目指令文件。** DSH、ZCode、Claude Code、Codex 都会。宿主不支持时，skill 会优雅降级——你粘贴它输出的开场白即可——但那份便利没有了。
+- **它救不了一个没有可执行验收标准的项目。** 如果"做完"不是可执行的，交接只能如实记录这一点，别的做不了。
+- **迁移已有的交接文件需要判断力。** 分不清某一节属于哪一类时，skill 会问用户，不会猜。
+- **evals 未执行**（见上）。把它们当成一份"意图说明书"，而不是一套通过的绿色测试。
 
-## A note on how much handoff skills are worth
+## 关于交接类 skill 到底值多少
 
-A generic handoff skill's value ceiling is *convenience*. Across one analysis of 673 agent skills, structural quality correlated near-zero with real usefulness (r ≈ 0.077). What actually helps is that the file records **your** project's specifics — the constraint that cost you a day, the approach you rejected and why. No skill can supply that content.
+值得说清：一个通用交接 skill 的价值上限就是**便利性**。在一项对 673 个 agent skill 的分析里，结构性质量与实际有用程度的相关性接近于零（r ≈ 0.077）。真正起作用的是文件里记下了**你这个项目特有的东西**——那个让你耗掉一整天的约束、你否掉的那个方案以及为什么否。这些内容没有任何 skill 能替你提供。
 
-This skill's job is narrower and more defensible: make sure that content gets written down, and run one honest check that the result actually works.
+这个 skill 的职责更窄，也更站得住：**确保那些内容被写下来，并跑一次诚实的检查确认它真的管用。**
 
-## License
+## 许可证
 
-MIT — see [LICENSE](LICENSE).
+MIT —— 见 [LICENSE](LICENSE)。
